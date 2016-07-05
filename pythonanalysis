@@ -1,0 +1,131 @@
+import numpy as np
+import scipy.stats as stats 
+import matplotlib.pyplot as plt
+import pandas as pd
+
+#loading up relevant files
+weather = pd.read_csv('weather.csv') # No longer putting index col as it causes issues selecting column, index_col = 0)
+trip = pd.read_csv('trip.csv') # No longer putting index col as it causes issues selecting column, index_col = 0)
+
+
+## New date stripping jam found on Kaggle from user jlin on "Count Prediction":
+weather['date'] = weather['date'].apply(lambda x: pd.datetime.strptime(x, "%m/%d/%Y"))
+trip['start_date'] = trip['start_date'].apply(lambda x: pd.datetime.strptime(x, "%m/%d/%Y %H:%M"))
+
+# cutting down to just date
+trip['date'] = trip['start_date'].apply(lambda x: x.date())
+weather['date'] = weather['date'].apply(lambda x: x.date())
+
+
+##TRIPS
+#counting the rows when grouped by day and subscriber (optional)
+trips_per_day = trip.groupby(['date', 'subscription_type']).size()
+
+#Add a name to the resulting series, can add "inplace=True"
+trips_per_day.rename('count')
+
+# Make it all a dataframe again for easy merging later
+trips_per_day = trips_per_day.to_frame().reset_index()
+
+
+##WEATHER
+#grouping weather by date - ignoring zipcodes as with trip count
+dayweather = weather.groupby(['date']).mean()
+
+#make date accessibe with reset_index
+dayweather = dayweather.reset_index()
+
+
+##MERGE
+#merge data together pre-analysis - this is like a join in SQL
+merged_set = dayweather.merge(trips_per_day, on=['date'])
+
+#rename count column
+merged_set.rename(columns={0:'trip_count'}, inplace=True)
+
+#make date datetime
+merged_set.date = pd.to_datetime(merged_set.date)
+
+#add weekday column using dayofweek function. 5,6 are saturday sunday
+merged_set['weekday'] = merged_set['date'].dt.dayofweek
+
+# looks like 2 separate datasets (one for subscription, one for customers) is way to do it
+merged_set_sub = merged_set[merged_set['subscription_type'] == 'Subscriber']
+merged_set_cust = merged_set[merged_set['subscription_type'] == 'Customer']
+
+#consider the weekend/weekday issue... create 4 datasets
+merged_set_sub_weekday = merged_set_sub[merged_set_sub['weekday'] < 5]
+merged_set_sub_weekend = merged_set_sub[merged_set_sub['weekday'] >= 5]
+
+merged_set_cust_weekday = merged_set_cust[merged_set_cust['weekday'] < 5]
+merged_set_cust_weekend = merged_set_cust[merged_set_cust['weekday'] >= 5]
+
+
+
+##CORRELATION?
+#Using Pearson's R to show correlation or lack thereof
+data_list = [merged_set_cust_weekday, merged_set_cust_weekend, merged_set_sub_weekday, merged_set_sub_weekend]
+z = 1
+
+for x in data_list:
+	y = stats.pearsonr(x.mean_temperature_f, x.trip_count)
+	print(y)
+
+	if y[0] > 0:
+		print(str(z) + " shows a positive correlation")
+	elif y[0] < 0:
+		print(str(z) + " shows a negative correlation")
+	else:
+		print(str(z) + " is not correlated")
+
+	if y[1] < 0.05:
+		print("and is statistically significant")
+	else:
+		print("but is not statistically significant")
+	z = z+1
+	print
+
+
+##PLOTTING
+#below plots 4 subplots of scatter graphs with trendlines
+
+fig = plt.figure()
+
+#Plot1
+ax1 = fig.add_subplot(221)
+ax1.scatter(merged_set_cust_weekday.mean_temperature_f, merged_set_cust_weekday.trip_count, c='blue')
+ax1.set_title('Weekday Customers')
+
+#trendline1
+fit1 = np.polyfit(merged_set_cust_weekday.mean_temperature_f, merged_set_cust_weekday.trip_count, deg=1)
+ax1.plot(merged_set_cust_weekday.mean_temperature_f, fit1[0] * merged_set_cust_weekday.mean_temperature_f + fit1[1], color='black')
+
+#Plot2
+ax2 = fig.add_subplot(222)
+ax2.scatter(merged_set_cust_weekend.mean_temperature_f, merged_set_cust_weekend.trip_count, c='darkblue')
+ax2.set_title('Weekend Customers')
+
+#trendline2
+fit2 = np.polyfit(merged_set_cust_weekend.mean_temperature_f, merged_set_cust_weekend.trip_count, deg=1)
+ax2.plot(merged_set_cust_weekend.mean_temperature_f, fit2[0] * merged_set_cust_weekend.mean_temperature_f + fit2[1], color='black')
+
+#Plot3
+ax3 = fig.add_subplot(223)
+ax3.scatter(merged_set_sub_weekday.mean_temperature_f, merged_set_sub_weekday.trip_count, c='red')
+ax3.set_title('Weekday Subscribers')
+
+#trendline3
+fit3 = np.polyfit(merged_set_sub_weekday.mean_temperature_f, merged_set_sub_weekday.trip_count, deg=1)
+ax3.plot(merged_set_sub_weekday.mean_temperature_f, fit3[0] * merged_set_sub_weekday.mean_temperature_f + fit3[1], color='black')
+
+#Plot4
+ax4 = fig.add_subplot(224)
+ax4.scatter(merged_set_sub_weekend.mean_temperature_f, merged_set_sub_weekend.trip_count, c='darkred')
+ax4.set_title('Weekend Subscribers')
+
+#trendline4
+fit4 = np.polyfit(merged_set_sub_weekend.mean_temperature_f, merged_set_sub_weekend.trip_count, deg=1)
+ax4.plot(merged_set_sub_weekend.mean_temperature_f, fit4[0] * merged_set_sub_weekend.mean_temperature_f + fit4[1], color='black')
+
+
+plt.show()
